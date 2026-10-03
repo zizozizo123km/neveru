@@ -4,8 +4,12 @@ import { Category, UserRole } from '../types';
 import { auth, db } from '../services/firebase';
 import { createUserWithEmailAndPassword, signInWithEmailAndPassword } from 'firebase/auth';
 import { ref, set } from 'firebase/database';
-import { ShoppingBag, Store, Bike, MapPin, ArrowRight, Loader2, Phone, Lock, User, Mail, ChevronLeft, AlertCircle, Upload, Camera, X, Navigation } from 'lucide-react';
-import { getWilayaFromCoordinates } from '../utils/helpers';
+import { 
+  ShoppingBag, Store, Bike, MapPin, ArrowRight, Loader2, Phone, Lock, 
+  User, Mail, ChevronLeft, ChevronDown, AlertCircle, CheckCircle2, 
+  Upload, Camera, X, Navigation, Info 
+} from 'lucide-react';
+import { getWilayaFromCoordinates, ALGERIA_WILAYAS, BIR_EL_ATER_CENTER } from '../utils/helpers';
 
 interface AuthScreenProps {
   onLogin: (role: UserRole, name?: string) => void;
@@ -32,6 +36,8 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLogin }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [isLocating, setIsLocating] = useState(false);
+  const [locationNotice, setLocationNotice] = useState('');
+  const [isGpsDetected, setIsGpsDetected] = useState(false);
   const [formData, setFormData] = useState({ 
     name: '', 
     email: '', 
@@ -49,39 +55,67 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLogin }) => {
     setSelectedRole(role);
     setAuthMode('LOGIN');
     setError('');
+    setLocationNotice('');
   };
 
   const handleBack = () => {
     setSelectedRole(null);
     setFormData({ name: '', email: '', phone: '', password: '', storeImage: '', coords: null, wilaya: '' });
     setError('');
+    setLocationNotice('');
+    setIsGpsDetected(false);
+  };
+
+  const handleSelectWilaya = (wilayaName: string) => {
+    const found = ALGERIA_WILAYAS.find(w => w.name === wilayaName);
+    if (found) {
+      setFormData(prev => ({ 
+        ...prev, 
+        wilaya: found.name, 
+        coords: { lat: found.lat, lng: found.lng } 
+      }));
+      setError('');
+      setLocationNotice('');
+      setIsGpsDetected(false);
+    } else {
+      setFormData(prev => ({ ...prev, wilaya: '', coords: null }));
+    }
   };
 
   const handleGetLocation = () => {
     setIsLocating(true);
     setError('');
-    if ("geolocation" in navigator) {
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          const detectedCoords = { lat: position.coords.latitude, lng: position.coords.longitude };
-          const detectedWilaya = getWilayaFromCoordinates(detectedCoords);
-          setFormData(prev => ({ 
-            ...prev, 
-            coords: detectedCoords,
-            wilaya: detectedWilaya
-          }));
-          setIsLocating(false);
-        },
-        (error) => {
-          setIsLocating(false);
-          setError("يرجى تفعيل صلاحية الوصول للموقع (GPS) لتتمكن من التسجيل.");
-        },
-        { enableHighAccuracy: true }
-      );
-    } else {
+    setLocationNotice('');
+    
+    if (!("geolocation" in navigator)) {
       setIsLocating(false);
-      setError("متصفحك لا يدعم تقنية تحديد الموقع.");
+      setLocationNotice("متصفحك لا يدعم نظام GPS. يمكنك اختيار ولايتك مباشرة من القائمة أدناه.");
+      return;
     }
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const detectedCoords = { lat: position.coords.latitude, lng: position.coords.longitude };
+        const detectedWilaya = getWilayaFromCoordinates(detectedCoords);
+        setFormData(prev => ({ 
+          ...prev, 
+          coords: detectedCoords,
+          wilaya: detectedWilaya
+        }));
+        setIsGpsDetected(true);
+        setIsLocating(false);
+        setLocationNotice(`تم تحديد موقعك بدقة عبر GPS (ولاية: ${detectedWilaya}) ✓`);
+      },
+      (geoError) => {
+        setIsLocating(false);
+        setIsGpsDetected(false);
+        // Note specifically about Android overlay / floating bubble issue
+        setLocationNotice(
+          "تعذر الوصول لـ GPS تلقائياً. لا مشكلة! يمكنك اختيار ولايتك مباشرة وبكل سهولة من القائمة أدناه. (ملاحظة: إذا ظهر لك تنبيه إغلاق الفقاعات في شاشة هاتفك، أغلق فقاعات ماسنجر أو الأشرطة العائمة إذا أردت استخدام GPS)."
+        );
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 }
+    );
   };
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -99,11 +133,11 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLogin }) => {
     setError('');
     
     if (authMode === 'REGISTER') {
-      if (!formData.coords) {
-        setError('تحديد الموقع الجغرافي إلزامي لضمان توجيهك لولايتك الصحيحة.');
+      if (!formData.wilaya) {
+        setError('يرجى اختيار ولايتك من القائمة لتحديد نطاق التوصيل.');
         return;
       }
-      if (!formData.name || !formData.phone || !formData.email || !formData.password) {
+      if (!formData.name.trim() || !formData.phone.trim() || !formData.email.trim() || !formData.password.trim()) {
         setError('يرجى ملء كافة البيانات المطلوبة.');
         return;
       }
@@ -113,19 +147,25 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLogin }) => {
 
     try {
       if (authMode === 'REGISTER') {
-        const userCredential = await createUserWithEmailAndPassword(auth, formData.email, formData.password);
+        const userCredential = await createUserWithEmailAndPassword(auth, formData.email.trim(), formData.password);
         const user = userCredential.user;
 
         const dbPath = selectedRole === UserRole.CUSTOMER ? 'customers' : selectedRole === UserRole.STORE ? 'stores' : 'drivers';
         
+        let finalCoords = formData.coords;
+        if (!finalCoords && formData.wilaya) {
+          const found = ALGERIA_WILAYAS.find(w => w.name === formData.wilaya);
+          finalCoords = found ? { lat: found.lat, lng: found.lng } : BIR_EL_ATER_CENTER;
+        }
+
         const profileData: any = {
             id: user.uid,
-            name: formData.name,
-            email: formData.email,
-            phone: formData.phone,
+            name: formData.name.trim(),
+            email: formData.email.trim(),
+            phone: formData.phone.trim(),
             role: selectedRole,
             createdAt: Date.now(),
-            coordinates: formData.coords,
+            coordinates: finalCoords || BIR_EL_ATER_CENTER,
             wilaya: formData.wilaya
         };
 
@@ -138,15 +178,17 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLogin }) => {
         }
 
         await set(ref(db, `${dbPath}/${user.uid}`), profileData);
-        onLogin(selectedRole!, formData.name);
+        onLogin(selectedRole!, formData.name.trim());
       } else {
-        await signInWithEmailAndPassword(auth, formData.email, formData.password);
+        await signInWithEmailAndPassword(auth, formData.email.trim(), formData.password);
         onLogin(selectedRole || UserRole.CUSTOMER);
       }
     } catch (err: any) {
       if (err.code === 'auth/email-already-in-use') setError('هذا البريد الإلكتروني مسجل مسبقاً.');
-      else if (err.code === 'auth/weak-password') setError('كلمة المرور ضعيفة جداً.');
-      else setError('حدث خطأ أثناء التسجيل: ' + err.message);
+      else if (err.code === 'auth/weak-password') setError('كلمة المرور ضعيفة (يجب أن تتكون من 6 أحرف على الأقل).');
+      else if (err.code === 'auth/invalid-email') setError('صيغة البريد الإلكتروني غير صحيحة.');
+      else if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') setError('البريد الإلكتروني أو كلمة المرور غير صحيحة.');
+      else setError('حدث خطأ أثناء المعالجة: ' + err.message);
     } finally {
       setIsLoading(false);
     }
@@ -170,6 +212,8 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLogin }) => {
       </div>
     );
   }
+
+  const isRegisterDisabled = authMode === 'REGISTER' && (!formData.wilaya || !formData.name || !formData.phone || !formData.email || !formData.password);
 
   return (
     <div className="min-h-screen bg-white flex items-center justify-center p-4 font-cairo text-right" dir="rtl">
@@ -197,18 +241,47 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLogin }) => {
                 </div>
               )}
 
-              <button 
-                type="button" 
-                onClick={handleGetLocation} 
-                disabled={isLocating}
-                className={`w-full p-5 rounded-2xl border-2 border-dashed transition-all flex flex-col items-center justify-center gap-1 font-black text-sm ${formData.coords ? 'border-green-500 text-green-600 bg-green-50 shadow-inner' : 'border-orange-200 text-orange-600 bg-orange-50 hover:bg-orange-100'}`}
-              >
-                <div className="flex items-center gap-3">
-                  {isLocating ? <Loader2 className="animate-spin w-5 h-5" /> : <Navigation className="w-5 h-5" />}
-                  {formData.coords ? `تم تحديد ولاية: ${formData.wilaya}` : 'تحديد موقعي الآن (لتحديد الولاية تلقائياً)'}
+              {/* اختيار الولاية يدوياً مع إمكانية GPS */}
+              <div className="space-y-2">
+                <label className="block text-xs font-black text-slate-700">
+                  الولاية التابع لها <span className="text-orange-500">*</span>
+                </label>
+
+                <div className="relative">
+                  <select
+                    value={formData.wilaya}
+                    onChange={(e) => handleSelectWilaya(e.target.value)}
+                    className="w-full p-4 pr-12 pl-10 bg-slate-50 border border-slate-200 rounded-2xl outline-none focus:border-orange-500 font-bold transition-all shadow-sm appearance-none text-slate-800 text-sm cursor-pointer"
+                  >
+                    <option value="">-- اختر ولايتك من القائمة (58 ولاية) --</option>
+                    {ALGERIA_WILAYAS.map((w) => (
+                      <option key={w.id} value={w.name}>
+                        {w.id} - ولاية {w.name}
+                      </option>
+                    ))}
+                  </select>
+                  <MapPin className="absolute right-4 top-4 text-orange-500 w-5 h-5 pointer-events-none" />
+                  <ChevronDown className="absolute left-4 top-4 text-slate-400 w-5 h-5 pointer-events-none" />
                 </div>
-                {formData.coords && <span className="text-[9px] opacity-70">تم التقاط إحداثيات GPS بنجاح ✓</span>}
-              </button>
+
+                {/* زر GPS التلقائي الاختياري */}
+                <button 
+                  type="button" 
+                  onClick={handleGetLocation} 
+                  disabled={isLocating}
+                  className="w-full py-2.5 px-4 rounded-xl border border-dashed border-orange-200 bg-orange-50/70 hover:bg-orange-100 text-orange-600 text-xs font-black flex items-center justify-center gap-2 transition-all active:scale-[0.98]"
+                >
+                  {isLocating ? <Loader2 className="animate-spin w-4 h-4 text-orange-600" /> : <Navigation className="w-4 h-4 text-orange-600" />}
+                  <span>{isLocating ? 'جاري تحديد موقعك عبر GPS...' : 'أو تحديد الولاية تلقائياً عبر GPS'}</span>
+                </button>
+
+                {locationNotice && (
+                  <div className={`p-3 rounded-xl text-xs font-bold flex items-start gap-2 ${isGpsDetected ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-amber-50 text-amber-800 border border-amber-200'}`}>
+                    {isGpsDetected ? <CheckCircle2 className="w-4 h-4 shrink-0 text-green-600 mt-0.5" /> : <Info className="w-4 h-4 shrink-0 text-amber-600 mt-0.5" />}
+                    <span>{locationNotice}</span>
+                  </div>
+                )}
+              </div>
 
               <div className="relative">
                 <input type="text" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} className="w-full p-4 pr-12 bg-slate-50 border border-slate-100 rounded-2xl outline-none focus:border-orange-500 font-bold transition-all shadow-sm" placeholder="الاسم الكامل" />
@@ -232,11 +305,15 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLogin }) => {
             <Lock className="absolute right-4 top-4 text-slate-300 w-5 h-5" />
           </div>
 
-          <button type="submit" disabled={isLoading || isUploading || (authMode === 'REGISTER' && !formData.coords)} className="w-full bg-[#2B2F3B] text-white py-5 rounded-2xl font-black text-lg shadow-xl shadow-slate-900/10 active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed">
+          <button 
+            type="submit" 
+            disabled={isLoading || isUploading || isRegisterDisabled} 
+            className="w-full bg-[#2B2F3B] text-white py-5 rounded-2xl font-black text-lg shadow-xl shadow-slate-900/10 active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed hover:bg-slate-900"
+          >
             {isLoading ? <Loader2 className="animate-spin mx-auto" /> : (authMode === 'LOGIN' ? 'دخول' : 'بدء الاستخدام في كيمو')}
           </button>
 
-          <button type="button" onClick={() => { setAuthMode(authMode === 'LOGIN' ? 'REGISTER' : 'LOGIN'); setError(''); }} className="w-full text-center text-slate-400 text-sm font-bold pt-4 hover:text-orange-500 transition-colors">
+          <button type="button" onClick={() => { setAuthMode(authMode === 'LOGIN' ? 'REGISTER' : 'LOGIN'); setError(''); setLocationNotice(''); }} className="w-full text-center text-slate-400 text-sm font-bold pt-4 hover:text-orange-500 transition-colors">
             {authMode === 'LOGIN' ? 'جديد في كيمو؟ سجل حسابك الحقيقي هنا' : 'لديك حساب؟ سجل دخولك'}
           </button>
         </form>

@@ -1,14 +1,14 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { Category, Product, StoreProfile, OrderStatus, Order, Coordinates } from '../types';
-import { formatCurrency } from '../utils/helpers';
+import { formatCurrency, ALGERIA_WILAYAS } from '../utils/helpers';
 import { db, auth } from '../services/firebase';
 import { ref, onValue, push, set, update, off } from 'firebase/database';
 import { 
   Search, Plus, Minus, ShoppingCart, MapPin, Loader2, Home, User, 
   Camera, LogOut, ClipboardList, Trash2, Star, ShieldCheck, 
   LayoutGrid, Save, RefreshCw, Phone, Sparkles, Navigation, X, Bot, Send,
-  ChevronLeft, ShoppingBag, Heart, Filter, CheckCircle2, Layout, Bike, PhoneCall,
+  ChevronLeft, ChevronDown, ShoppingBag, Heart, Filter, CheckCircle2, Layout, Bike, PhoneCall,
   Clock, Map as MapIcon, Timer, Truck, ArrowRight, CheckCircle, Edit3, ShoppingBasket,
   Utensils, Shirt, Smartphone, Briefcase, BabyIcon, MessageSquareQuote, FileText
 } from 'lucide-react';
@@ -127,22 +127,31 @@ export const CustomerScreen: React.FC<{onLogout: () => void, userName: string}> 
     }
   };
 
+  const [profileMsg, setProfileMsg] = useState('');
+
   const handleUpdateProfile = async () => {
     if (!user || !profileData.name) return;
     setIsUpdating(true);
     isUpdatingRef.current = true;
     try {
+      const found = ALGERIA_WILAYAS.find(w => w.name === profileData.wilaya);
+      const coords = found ? { lat: found.lat, lng: found.lng } : profileData.coordinates;
       await update(ref(db, `customers/${user.uid}`), { 
         name: profileData.name, 
         phone: profileData.phone,
-        avatar: profileData.avatar
+        avatar: profileData.avatar,
+        wilaya: profileData.wilaya,
+        coordinates: coords
       });
       setIsEditingProfile(false);
-      alert("تم حفظ البيانات بنجاح ✓");
-      setTimeout(() => { isUpdatingRef.current = false; }, 3000);
+      setProfileMsg("تم حفظ البيانات بنجاح ✓");
+      setTimeout(() => { 
+        isUpdatingRef.current = false; 
+        setProfileMsg('');
+      }, 3000);
     } catch (e) {
       isUpdatingRef.current = false;
-      alert("فشل تحديث البيانات");
+      setProfileMsg("فشل تحديث البيانات، يرجى المحاولة لاحقاً");
     } finally {
       setIsUpdating(false);
     }
@@ -277,10 +286,16 @@ export const CustomerScreen: React.FC<{onLogout: () => void, userName: string}> 
                 </div>
                 <input type="file" ref={fileInputRef} onChange={handleAvatarUpload} className="hidden" accept="image/*" />
                 
+                {profileMsg && (
+                  <div className="bg-green-50 text-green-700 p-3 rounded-2xl text-xs font-black mb-4 border border-green-200 text-center animate-fade-in">
+                    {profileMsg}
+                  </div>
+                )}
+
                 {!isEditingProfile ? (
                   <>
                     <h3 className="text-2xl font-black text-slate-800 mb-1">{profileData.name || userName}</h3>
-                    <p className="text-xs text-orange-500 font-bold mb-8">ولاية: {profileData.wilaya}</p>
+                    <p className="text-xs text-orange-500 font-bold mb-8">ولاية: {profileData.wilaya || 'غير محددة'}</p>
                     <div className="space-y-3">
                       <button onClick={() => setIsEditingProfile(true)} className="w-full bg-slate-100 py-4 rounded-2xl font-black text-slate-700 text-sm flex items-center justify-center gap-2 active:scale-95 transition-all">
                         <Edit3 size={18} /> تعديل الملف
@@ -292,11 +307,34 @@ export const CustomerScreen: React.FC<{onLogout: () => void, userName: string}> 
                   </>
                 ) : (
                   <div className="space-y-4 text-right">
-                    <input type="text" value={profileData.name} onChange={e => setProfileData({...profileData, name: e.target.value})} className="w-full p-4 bg-slate-50 rounded-2xl font-bold outline-none border-2 border-transparent focus:border-orange-500 transition-all" placeholder="الاسم" />
-                    <input type="tel" value={profileData.phone} onChange={e => setProfileData({...profileData, phone: e.target.value})} className="w-full p-4 bg-slate-50 rounded-2xl font-bold outline-none border-2 border-transparent focus:border-orange-500 transition-all" placeholder="الهاتف" />
-                    <div className="flex gap-3">
+                    <div>
+                      <label className="block text-xs font-black text-slate-600 mb-1">الاسم</label>
+                      <input type="text" value={profileData.name} onChange={e => setProfileData({...profileData, name: e.target.value})} className="w-full p-4 bg-slate-50 rounded-2xl font-bold outline-none border-2 border-transparent focus:border-orange-500 transition-all text-sm" placeholder="الاسم" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-black text-slate-600 mb-1">الهاتف</label>
+                      <input type="tel" value={profileData.phone} onChange={e => setProfileData({...profileData, phone: e.target.value})} className="w-full p-4 bg-slate-50 rounded-2xl font-bold outline-none border-2 border-transparent focus:border-orange-500 transition-all text-sm" placeholder="الهاتف" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-black text-slate-600 mb-1">الولاية (58 ولاية)</label>
+                      <div className="relative">
+                        <select 
+                          value={profileData.wilaya} 
+                          onChange={e => setProfileData({...profileData, wilaya: e.target.value})}
+                          className="w-full p-4 pr-10 pl-8 bg-slate-50 rounded-2xl font-bold outline-none border-2 border-transparent focus:border-orange-500 transition-all text-sm appearance-none cursor-pointer"
+                        >
+                          <option value="">-- اختر ولايتك --</option>
+                          {ALGERIA_WILAYAS.map(w => (
+                            <option key={w.id} value={w.name}>{w.id} - ولاية {w.name}</option>
+                          ))}
+                        </select>
+                        <MapPin className="absolute right-3.5 top-4 text-orange-500 w-4 h-4 pointer-events-none" />
+                        <ChevronDown className="absolute left-3.5 top-4 text-slate-400 w-4 h-4 pointer-events-none" />
+                      </div>
+                    </div>
+                    <div className="flex gap-3 pt-2">
                       <button onClick={handleUpdateProfile} disabled={isUpdating} className="flex-1 bg-black text-white py-4 rounded-2xl font-black text-sm active:scale-95 transition-all">
-                        {isUpdating ? <Loader2 className="animate-spin mx-auto" /> : 'حفظ'}
+                        {isUpdating ? <Loader2 className="animate-spin mx-auto" /> : 'حفظ التعديلات'}
                       </button>
                       <button onClick={() => setIsEditingProfile(false)} className="px-6 bg-slate-100 text-slate-400 py-4 rounded-2xl font-black">إلغاء</button>
                     </div>

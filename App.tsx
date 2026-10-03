@@ -10,7 +10,7 @@ import { auth, db } from './services/firebase';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { ref, get, onValue } from 'firebase/database';
 import { Loader2, Lock, Bell, X, Sparkles, Megaphone, BellRing, RefreshCw } from 'lucide-react';
-import getFCMToken from './services/fcmService';
+import getFCMToken, { requestFCMTokenWithPermission } from './services/fcmService';
 
 const App: React.FC = () => {
   const [currentRole, setCurrentRole] = useState<UserRole | null>(null);
@@ -139,7 +139,24 @@ const App: React.FC = () => {
             <BellRing className="w-5 h-5 text-orange-500 animate-bounce" />
             <p className="text-[10px] font-black">فعل الإشعارات لتوصلك رسائل المسؤول فوراً!</p>
           </div>
-          <button onClick={() => Notification.requestPermission().then(setNotifPermissionStatus)} className="bg-orange-500 text-white px-4 py-1.5 rounded-full text-[10px] font-black shadow-lg">تفعيل</button>
+          <button 
+            onClick={async () => {
+              try {
+                if ('Notification' in window) {
+                  const perm = await Notification.requestPermission();
+                  setNotifPermissionStatus(perm);
+                  if (perm === 'granted') {
+                    requestFCMTokenWithPermission(currentRole);
+                  }
+                }
+              } catch (e) {
+                console.warn("Notification error:", e);
+              }
+            }} 
+            className="bg-orange-500 text-white px-4 py-1.5 rounded-full text-[10px] font-black shadow-lg hover:bg-orange-600 transition-colors"
+          >
+            تفعيل
+          </button>
         </div>
       )}
 
